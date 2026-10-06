@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Angle Visualizer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: transparent; overflow: hidden; }
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #fff; }
+
+  /* the drawing layer fills the whole screen and has no background */
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; background: transparent; touch-action: none; cursor: crosshair; }
+
+  /* floating, draggable menu button (shows an image instead of three lines) */
+  #menuBtn {
+    position: fixed; z-index: 20; width: 52px; height: 52px; padding: 0; border-radius: 50%;
+    background: rgba(24,24,28,.86); border: 1px solid rgba(217,70,239,.75);
+    box-shadow: 0 2px 10px rgba(0,0,0,.45); cursor: grab; touch-action: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #menuBtn img { width: 34px; height: 34px; pointer-events: none; -webkit-user-drag: none; user-select: none; }
+  #menuBtn.on { border-color: #fb923c; }
+
+  /* sliding, movable settings popup */
+  #panel {
+    position: fixed; z-index: 30; width: min(292px, calc(100vw - 16px)); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px);
+    display: flex; flex-direction: column; background: rgba(28,28,32,.97);
+    border: 1px solid #55555e; border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,.55);
+    opacity: 0; visibility: hidden; transform: translateY(-10px) scale(.94); transform-origin: top right;
+    transition: opacity .18s ease, transform .18s ease, visibility .18s;
+  }
+  #panel.open { opacity: 1; visibility: visible; transform: none; }
+  #panelHead {
+    display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 12px; cursor: grab; touch-action: none;
+    border-bottom: 1px solid #3b3b44; user-select: none; -webkit-user-select: none;
+  }
+  #panelHead .grip { width: 16px; height: 16px; flex: none; opacity: .7;
+    background: radial-gradient(circle, #aaa 1.3px, transparent 1.6px) 0 0 / 6px 6px; }
+  #panelHead .ptitle { flex: 1; font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #d946ef; }
+  #panelClose { width: 28px; height: 28px; border: none; border-radius: 50%; background: #3a3a44; color: #fff; font-size: 16px; line-height: 1; cursor: pointer; }
+  .pbody { padding: 12px; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  .status { font-size: 12px; line-height: 1.5; color: #fdba74; background: #2f2a26; border-left: 3px solid #fb923c; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
+  .control-group { margin-bottom: 13px; }
+  .control-group label { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 11px; text-transform: uppercase; color: #aaa; font-weight: 600; }
+  .control-group label span { color: #d8b4fe; font-weight: 600; }
+  input[type="range"] { width: 100%; height: 6px; border-radius: 3px; background: #444; outline: none; -webkit-appearance: none; appearance: none; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #d946ef; cursor: pointer; }
+  input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: #d946ef; border: none; cursor: pointer; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc; margin: 4px 0 12px; }
+  .btn { width: 100%; padding: 10px; margin-top: 7px; background: #d946ef; color: #1a1a1a; border: none; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; }
+  .btn.alt { background: #44444e; color: #fff; }
+  .seg { display: flex; gap: 6px; }
+  .seg button { flex: 1; padding: 8px 4px; border: 1px solid #55555e; border-radius: 6px; background: #2c2c34; color: #ddd; font-size: 12px; cursor: pointer; }
+  .seg button.active { background: #d946ef; color: #1a1a1a; border-color: #d946ef; font-weight: 600; }
+  details { margin-top: 14px; font-size: 12px; line-height: 1.65; color: #ccc; }
+  details summary { cursor: pointer; color: #d946ef; font-weight: 600; }
+  details ul { list-style: none; margin-top: 6px; }
+  details li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<!-- Menu button. To use your own picture later, just change the src of this <img>. -->
+<button id="menuBtn" aria-label="Settings"><img id="menuIcon" alt=""></button>
+
+<div id="panel" aria-hidden="true">
+  <div id="panelHead"><div class="grip"></div><div class="ptitle">Table settings</div><button id="panelClose" aria-label="Close">&times;</button></div>
+  <div class="pbody">
+    <div class="status" id="status"></div>
+
+    <div class="control-group">
+      <label>Table width <span id="widthValue"></span></label>
+      <input type="range" id="rectWidth" min="100" max="900" value="600">
+    </div>
+    <div class="control-group">
+      <label>Table height <span id="heightValue"></span></label>
+      <input type="range" id="rectHeight" min="80" max="700" value="400">
+    </div>
+    <div class="control-group">
+      <label>Holes per side (top / bottom) <span id="countValue"></span></label>
+      <input type="range" id="holeCount" min="2" max="9" value="3">
+    </div>
+    <div class="control-group">
+      <label>Hole radius <span id="radiusValue"></span></label>
+      <input type="range" id="holeRadius" min="4" max="30" value="12">
+    </div>
+    <div class="control-group">
+      <label>Center box size <span id="boxSizeValue"></span></label>
+      <input type="range" id="boxSize" min="20" max="90" value="40">
+    </div>
+
+    <label class="check"><input type="checkbox" id="showAngles" checked> Show angle values</label>
+
+    <button class="btn" id="obsBtn">+ Add obstacle</button>
+    <button class="btn alt" id="clearObsBtn">Remove all obstacles</button>
+    <button class="btn alt" id="snapBtn">Reset all lines to direct</button>
+    <button class="btn alt" id="centerBtn">Re-center circle</button>
+
+    <div class="control-group" style="margin-top:14px">
+      <label>Test backdrop (browser only)</label>
+      <div class="seg" id="backdropSeg">
+        <button data-bg="transparent" class="active">None</button>
+        <button data-bg="#1a1a1a">Dark</button>
+        <button data-bg="#f3f3f3">Light</button>
+      </div>
+    </div>
+
+    <details>
+      <summary>How to use</summary>
+      <ul>
+        <li>Drag the <b>round menu button</b> anywhere. Tap it to open or close this panel. Drag this panel by its top bar.</li>
+        <li>Drag the <b>center box</b> to move the circle.</li>
+        <li>Each line goes straight to its hole epicenter (purple).</li>
+        <li><b>Double-tap a hole</b> to choose its epic angle. Every real angle to that hole appears as a faint line. Touch the one you want: it bounces off the walls and still ends on the epicenter (orange). Double-tap the hole again to finish.</li>
+        <li><b>Obstacles</b>: drag them anywhere. No line touches one; a blocked line goes round by itself. Double-tap an obstacle to remove it.</li>
+      </ul>
+    </details>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const MAX_BOUNCES = 5;           // every angle up to this many wall bounces is offered
+const BALL_R = 8;                // radius of the circle in the box AND of every obstacle (always the same)
+const LINE_W = 1;                // every line is 1px
+
+const state = {
+  rectWidth: 600, rectHeight: 400,
+  holeRadius: 12, boxSize: 40, holeCount: 3,
+  showAngles: true,
+  offX: 0, offY: 0,     // circle position relative to the table centre
+  routes: [],           // per line: walls it bounces off before the hole ([] = direct, ['B'] = via bottom wall)
+  selected: -1,         // hole whose line is being edited, -1 = none
+  obstacles: [],        // {x, y} relative to the table centre
+  dragging: null,       // 'center' | {line:i} | {obstacle:i} | null
+  grab: { dx: 0, dy: 0 },
+  W: 0, H: 0
+};
+
+const COLORS = {
+  rect: '#b946ef', hole: '#ef4444', direct: '#b946ef', bank: '#fb923c',
+  box: '#b946ef', ball: '#fde047', linked: '#4ade80', blocked: '#f87171', obstacle: '#8b95a5'
+};
+
+// ---------- geometry ----------
+function margin() { return state.holeRadius + 10; }
+function rw() { return Math.max(40, Math.min(state.rectWidth, state.W - 2 * margin())); }
+function rh() { return Math.max(40, Math.min(state.rectHeight, state.H - 2 * margin())); }
+function rectCenter() { return { x: state.W / 2, y: state.H / 2 }; }
+function rectBounds() {
+  const r = rectCenter(), w = rw(), h = rh();
+  return { left: r.x - w / 2, right: r.x + w / 2, top: r.y - h / 2, bottom: r.y + h / 2 };
+}
+function center() {
+  const r = rectCenter(), b = rectBounds();
+  return {
+    x: Math.max(b.left + 1, Math.min(b.right - 1, r.x + state.offX)),
+    y: Math.max(b.top + 1, Math.min(b.bottom - 1, r.y + state.offY))
+  };
+}
+function getHoles() {
+  const n = state.holeCount, b = rectBounds(), w = b.right - b.left;
+  const holes = [];
+  for (let i = 0; i < n; i++) holes.push({ x: b.left + (w * i) / (n - 1), y: b.top });
+  for (let i = 0; i < n; i++) holes.push({ x: b.left + (w * i) / (n - 1), y: b.bottom });
+  return holes;
+}
+function getObstacles() {
+  const r = rectCenter(), b = rectBounds(), rad = BALL_R;
+  return state.obstacles.map(o => ({
+    x: Math.max(b.left + rad, Math.min(b.right - rad, r.x + o.x)),
+    y: Math.max(b.top + rad, Math.min(b.bottom - rad, r.y + o.y)),
+    r: rad
+  }));
+}
+function resetRoutes() { state.routes = Array.from({ length: state.holeCount * 2 }, () => []); state.selected = -1; }
+
+function normAngle(a) {
+  while (a > Math.PI) a -= 2 * Math.PI;
+  while (a < -Math.PI) a += 2 * Math.PI;
+  return a;
+}
+function distToSegment(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+function distToPath(px, py, pts) {
+  let d = Infinity;
+  for (let k = 0; k < pts.length - 1; k++)
+    d = Math.min(d, distToSegment(px, py, pts[k].x, pts[k].y, pts[k + 1].x, pts[k + 1].y));
+  return d;
+}
+function pathLength(pts) {
+  let s = 0;
+  for (let k = 0; k < pts.length - 1; k++) s += Math.hypot(pts[k + 1].x - pts[k].x, pts[k + 1].y - pts[k].y);
+  return s;
+}
+// a path is blocked if any part of it comes within an obstacle (obstacle radius + half the line width)
+function pathBlocked(pts, obs) {
+  const half = LINE_W / 2;
+  for (const o of obs) if (distToPath(o.x, o.y, pts) < o.r + half) return true;
+  return false;
+}
+
+function reflectPoint(p, wall) {
+  const b = rectBounds();
+  if (wall === 'T') return { x: p.x, y: 2 * b.top - p.y };
+  if (wall === 'B') return { x: p.x, y: 2 * b.bottom - p.y };
+  if (wall === 'L') return { x: 2 * b.left - p.x, y: p.y };
+  return { x: 2 * b.right - p.x, y: p.y };
+}
+// Launch angle that sends a line from c, off the walls in `route` (in order), onto H:
+// mirror the hole across the last wall, then the one before, ... then aim straight at the final image.
+function routeAngle(c, H, route) {
+  let img = H;
+  for (let j = route.length - 1; j >= 0; j--) img = reflectPoint(img, route[j]);
+  return Math.atan2(img.y - c.y, img.x - c.x);
+}
+// Fire a ray from c; follow it through up to maxHits wall hits with true reflection.
+function tracePath(c, ang, maxHits) {
+  const b = rectBounds();
+  const pts = [{ x: c.x, y: c.y }], walls = [];
+  let px = c.x, py = c.y, dx = Math.cos(ang), dy = Math.sin(ang);
+  for (let k = 0; k < maxHits; k++) {
+    let t = Infinity, wall = null;
+    if (dx > 1e-9)  { const tt = (b.right - px) / dx;  if (tt > 1e-6 && tt < t) { t = tt; wall = 'R'; } }
+    if (dx < -1e-9) { const tt = (b.left - px) / dx;   if (tt > 1e-6 && tt < t) { t = tt; wall = 'L'; } }
+    if (dy > 1e-9)  { const tt = (b.bottom - py) / dy; if (tt > 1e-6 && tt < t) { t = tt; wall = 'B'; } }
+    if (dy < -1e-9) { const tt = (b.top - py) / dy;    if (tt > 1e-6 && tt < t) { t = tt; wall = 'T'; } }
+    if (!wall) break;
+    px += dx * t; py += dy * t;
+    pts.push({ x: px, y: py }); walls.push(wall);
+    if (wall === 'L' || wall === 'R') dx = -dx; else dy = -dy;   // law of reflection
+  }
+  return { pts, walls };
+}
+// Real only if the traced ray bounces off exactly those walls and lands on the hole epicenter.
+function buildPath(c, H, route) {
+  const ang = routeAngle(c, H, route);
+  const tr = tracePath(c, ang, route.length + 1);
+  if (tr.walls.length !== route.length + 1) return null;
+  for (let j = 0; j < route.length; j++) if (tr.walls[j] !== route[j]) return null;
+  const last = tr.pts[tr.pts.length - 1];
+  if (Math.hypot(last.x - H.x, last.y - H.y) > 0.75) return null;
+  tr.pts[tr.pts.length - 1] = { x: H.x, y: H.y };
+  return { route: route.slice(), ang, pts: tr.pts };
+}
+
+const ROUTES = (() => {                       // every wall sequence up to MAX_BOUNCES, fewer bounces first
+  const W = ['T', 'B', 'L', 'R'], out = [[]];
+  let level = [[]];
+  for (let n = 1; n <= MAX_BOUNCES; n++) {
+    const next = [];
+    level.forEach(r => W.forEach(w => { if (r[r.length - 1] !== w) next.push(r.concat(w)); }));
+    next.forEach(r => out.push(r));
+    level = next;
+  }
+  return out;
+})();
+
+// All real, obstacle-free paths from the circle to this hole.
+function candidatesFor(c, H, obs) {
+  const res = [];
+  ROUTES.forEach(r => {
+    const p = buildPath(c, H, r);
+    if (!p) return;
+    if (res.some(q => Math.abs(normAngle(q.ang - p.ang)) < 1e-4)) return;   // same line reached two ways
+    if (pathBlocked(p.pts, obs)) return;
+    res.push(p);
+  });
+  return res;
+}
+
+// The option the finger is closest to.
+function pickCandidate(cands, p, currentRoute) {
+  let best = null, bestD = Infinity;
+  cands.forEach(cd => {
+    let d = distToPath(p.x, p.y, cd.pts);
+    if (currentRoute && cd.route.join('') === currentRoute.join('')) d -= 0.5;
+    if (d < bestD) { bestD = d; best = cd; }
+  });
+  return { cand: best, dist: bestD };
+}
+
+// Final line for every hole. A line never vanishes and never touches an obstacle if any clear way exists.
+function getLines() {
+  const c = center(), obs = getObstacles();
+  return getHoles().map((hole, i) => {
+    let p = buildPath(c, hole, state.routes[i] || []);
+    let rerouted = false, blocked = false;
+    if (!p || pathBlocked(p.pts, obs)) {
+      const cands = candidatesFor(c, hole, obs);
+      if (cands.length) {
+        cands.sort((a, b) => pathLength(a.pts) - pathLength(b.pts));
+        p = cands[0]; rerouted = true;                       // shortest clear way to the hole
+      } else {
+        p = buildPath(c, hole, []) || { route: [], ang: Math.atan2(hole.y - c.y, hole.x - c.x), pts: [{ x: c.x, y: c.y }, { x: hole.x, y: hole.y }] };
+        blocked = true;                                      // no clear way at all: show the straight line in red
+      }
+    }
+    return { i, hole, ang: p.ang, pts: p.pts, route: p.route, direct: p.route.length === 0, rerouted, blocked };
+  });
+}
+
+// ---------- drawing (only 1px lines, nothing filled) ----------
+function strokePath(pts, color, width, alpha, dash) {
+  ctx.save();
+  ctx.globalAlpha = alpha; ctx.strokeStyle = color; ctx.lineWidth = width;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (dash) ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+  for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+  ctx.stroke();
+  ctx.restore();
+}
+function ring(x, y, r, color, w) {
+  ctx.strokeStyle = color; ctx.lineWidth = w || 1;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+}
+function dot(x, y, r, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+function label(text, x, y, color) {            // thin dark halo keeps the numbers readable over any app
+  ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.lineJoin = 'round';
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = color; ctx.fillText(text, x, y);
+}
+
+let lastStatus = '';
+function draw() {
+  ctx.clearRect(0, 0, state.W, state.H);
+  const b = rectBounds();
+  const c = center();
+  const obs = getObstacles();
+
+  ctx.strokeStyle = COLORS.rect; ctx.lineWidth = 1;
+  ctx.strokeRect(b.left + 0.5, b.top + 0.5, (b.right - b.left) - 1, (b.bottom - b.top) - 1);
+
+  // obstacles: same size as the circle
+  obs.forEach(o => {
+    ring(o.x, o.y, o.r, COLORS.obstacle, 1);
+    const k = o.r * 0.45;
+    ctx.strokeStyle = COLORS.obstacle; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(o.x - k, o.y - k); ctx.lineTo(o.x + k, o.y + k);
+    ctx.moveTo(o.x + k, o.y - k); ctx.lineTo(o.x - k, o.y + k); ctx.stroke();
+  });
+
+  const lines = getLines();
+
+  // every real angle for the selected hole
+  let optionCount = 0;
+  if (state.selected >= 0) {
+    const cands = candidatesFor(c, getHoles()[state.selected], obs);
+    optionCount = cands.length;
+    const cur = lines[state.selected].route.join('');
+    // fewer bounces = clearer; long multi-bounce angles stay faint in the background but are still selectable
+    const fade = [0.9, 0.7, 0.45, 0.28, 0.18, 0.12];
+    cands.slice().sort((a, b) => b.route.length - a.route.length).forEach(cd => {
+      if (cd.route.join('') !== cur) strokePath(cd.pts, COLORS.bank, LINE_W, fade[cd.route.length], [5, 5]);
+    });
+  }
+
+  lines.forEach(l => {
+    const col = l.blocked ? COLORS.blocked : (l.direct ? COLORS.direct : COLORS.bank);
+    strokePath(l.pts, col, LINE_W, 0.95, l.blocked ? [8, 6] : null);
+    for (let k = 1; k < l.pts.length - 1; k++) dot(l.pts[k].x, l.pts[k].y, 2, col);   // bounce points
+  });
+
+  if (state.showAngles) {
+    ctx.font = 'bold 14px Segoe UI, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    lines.forEach(l => {
+      let deg = -l.ang * 180 / Math.PI;
+      deg = ((deg % 360) + 360) % 360;
+      const a = l.pts[0], z = l.pts[1];
+      const segLen = Math.hypot(z.x - a.x, z.y - a.y);
+      const ux = (z.x - a.x) / (segLen || 1), uy = (z.y - a.y) / (segLen || 1);
+      const d = Math.min(segLen * 0.55, 90);
+      label(deg.toFixed(1) + '°', a.x + ux * d - uy * 12, a.y + uy * d + ux * 12,
+            l.blocked ? COLORS.blocked : (l.direct ? '#e9d5ff' : COLORS.bank));
+    });
+  }
+
+  // holes: every line ends on its epicenter
+  getHoles().forEach((h, i) => {
+    if (i === state.selected) ring(h.x, h.y, state.holeRadius + 6, COLORS.bank, 1);
+    ring(h.x, h.y, state.holeRadius, COLORS.hole, 1);
+    dot(h.x, h.y, 1.6, lines[i].blocked ? COLORS.blocked : COLORS.linked);
+  });
+
+  // circle box + the circle itself
+  const half = state.boxSize / 2;
+  ctx.strokeStyle = COLORS.box; ctx.lineWidth = 1;
+  ctx.strokeRect(c.x - half + 0.5, c.y - half + 0.5, state.boxSize - 1, state.boxSize - 1);
+  ring(c.x, c.y, BALL_R, COLORS.ball, 1);
+  dot(c.x, c.y, 1.6, COLORS.ball);
+
+  // status text lives in the settings panel, not on the screen
+  const st = state.selected >= 0
+    ? 'Hole ' + (state.selected + 1) + ' selected: ' + optionCount + ' possible angles. Touch the faint line you want. Double-tap the hole to finish.'
+    : 'Double-tap a hole to choose its epic angle.';
+  const msg = st + (lines.some(l => l.blocked) ? ' Red dashed line: every route to that hole is blocked by obstacles.' : '');
+  if (msg !== lastStatus) { document.getElementById('status').textContent = msg; lastStatus = msg; }
+}
+
+// ---------- hit testing ----------
+function inBox(x, y) {
+  const c = center(), h = state.boxSize / 2 + 6;
+  return Math.abs(x - c.x) <= h && Math.abs(y - c.y) <= h;
+}
+function holeAt(x, y) {
+  const r = state.holeRadius + 12;
+  let best = -1, bestD = r;
+  getHoles().forEach((h, i) => { const d = Math.hypot(x - h.x, y - h.y); if (d <= bestD) { bestD = d; best = i; } });
+  return best;
+}
+function obstacleAt(x, y) {
+  const obs = getObstacles();
+  for (let i = obs.length - 1; i >= 0; i--) if (Math.hypot(x - obs[i].x, y - obs[i].y) <= obs[i].r + 12) return i;
+  return -1;
+}
+// the option under the finger for the selected hole (null if the finger is too far from every option)
+function optionAt(p) {
+  if (state.selected < 0) return null;
+  const c = center();
+  if (Math.hypot(p.x - c.x, p.y - c.y) < 20) return null;        // all paths meet at the circle
+  const cands = candidatesFor(c, getHoles()[state.selected], getObstacles());
+  const lines = getLines();
+  const r = pickCandidate(cands, p, lines[state.selected].route);
+  return r.cand && r.dist <= 40 ? r.cand : null;
+}
+
+// ---------- pointer interaction ----------
+function pos(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+let lastTap = null;
+
+canvas.addEventListener('pointerdown', e => {
+  const p = pos(e);
+  const now = performance.now();
+  state.dragging = null;
+
+  if (inBox(p.x, p.y)) {                                        // 1) the circle's box
+    lastTap = null;
+    const c = center();
+    state.grab = { dx: p.x - c.x, dy: p.y - c.y };
+    state.dragging = 'center';
+  } else {
+    const oi = obstacleAt(p.x, p.y);
+    const hi = oi === -1 ? holeAt(p.x, p.y) : -1;
+    const kind = oi !== -1 ? 'o' : (hi !== -1 ? 'h' : null);
+    const id = oi !== -1 ? oi : hi;
+    const isDouble = kind && lastTap && lastTap.kind === kind && lastTap.id === id && now - lastTap.t < 380;
+
+    if (isDouble) {
+      lastTap = null;
+      if (kind === 'h') state.selected = (state.selected === id) ? -1 : id;     // choose / finish epic angle
+      else state.obstacles.splice(id, 1);                                        // remove obstacle
+      draw();
+      return;
+    }
+    lastTap = kind ? { kind, id, t: now } : null;
+
+    if (kind === 'o') {                                         // 2) drag an obstacle
+      const o = getObstacles()[oi];
+      state.grab = { dx: p.x - o.x, dy: p.y - o.y };
+      state.dragging = { obstacle: oi };
+    } else if (kind === null) {                                 // 3) pick an option of the selected hole
+      const cd = optionAt(p);
+      if (cd) { state.routes[state.selected] = cd.route; state.dragging = { line: state.selected }; }
+    }
+  }
+  if (state.dragging) { canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; }
+  draw();
+});
+
+canvas.addEventListener('pointermove', e => {
+  const p = pos(e);
+  const d = state.dragging;
+  if (d === 'center') {
+    const hw = rw() / 2, hh = rh() / 2;
+    state.offX = Math.max(-hw, Math.min(hw, p.x - state.grab.dx - state.W / 2));
+    state.offY = Math.max(-hh, Math.min(hh, p.y - state.grab.dy - state.H / 2));
+    draw();
+  } else if (d && d.obstacle !== undefined) {
+    const r = rectCenter();
+    state.obstacles[d.obstacle] = { x: p.x - state.grab.dx - r.x, y: p.y - state.grab.dy - r.y };
+    draw();
+  } else if (d && d.line !== undefined) {
+    const cd = optionAt(p);
+    if (cd) state.routes[d.line] = cd.route;
+    draw();
+  } else {
+    canvas.style.cursor = (inBox(p.x, p.y) || obstacleAt(p.x, p.y) !== -1 || holeAt(p.x, p.y) !== -1 || optionAt(p)) ? 'pointer' : 'crosshair';
+  }
+});
+
+function endDrag() { state.dragging = null; canvas.style.cursor = 'crosshair'; draw(); }
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+// ---------- settings controls ----------
+function bindSlider(id, key, labelId, after) {
+  const el = document.getElementById(id);
+  const out = document.getElementById(labelId);
+  const show = () => { out.textContent = id === 'holeCount' ? state[key] : state[key] + 'px'; };
+  el.value = state[key]; show();
+  el.addEventListener('input', () => {
+    state[key] = parseInt(el.value);
+    show();
+    if (after) after();
+    draw();
+  });
+  return { el, show };
+}
+const sWidth = bindSlider('rectWidth', 'rectWidth', 'widthValue');
+const sHeight = bindSlider('rectHeight', 'rectHeight', 'heightValue');
+bindSlider('holeRadius', 'holeRadius', 'radiusValue', syncLimits);
+bindSlider('boxSize', 'boxSize', 'boxSizeValue');
+bindSlider('holeCount', 'holeCount', 'countValue', resetRoutes);
+
+// the width/height sliders always span exactly what fits on this screen
+function syncLimits() {
+  const maxW = Math.max(120, Math.floor(state.W - 2 * margin()));
+  const maxH = Math.max(100, Math.floor(state.H - 2 * margin()));
+  sWidth.el.max = maxW; sHeight.el.max = maxH;
+  state.rectWidth = Math.min(state.rectWidth, maxW);
+  state.rectHeight = Math.min(state.rectHeight, maxH);
+  sWidth.el.value = state.rectWidth; sHeight.el.value = state.rectHeight;
+  sWidth.show(); sHeight.show();
+}
+
+document.getElementById('showAngles').addEventListener('change', e => { state.showAngles = e.target.checked; draw(); });
+document.getElementById('snapBtn').addEventListener('click', () => { resetRoutes(); draw(); });
+document.getElementById('centerBtn').addEventListener('click', () => { state.offX = 0; state.offY = 0; draw(); });
+document.getElementById('clearObsBtn').addEventListener('click', () => { state.obstacles = []; draw(); });
+document.getElementById('obsBtn').addEventListener('click', () => {
+  const spots = [[0.22, -0.18], [-0.22, 0.18], [0.22, 0.2], [-0.22, -0.2], [0, -0.3], [0, 0.3]];
+  const s = spots[state.obstacles.length % spots.length];
+  state.obstacles.push({ x: s[0] * rw(), y: s[1] * rh() });
+  draw();
+});
+document.querySelectorAll('#backdropSeg button').forEach(btn => btn.addEventListener('click', () => {
+  document.body.style.background = btn.dataset.bg;
+  document.querySelectorAll('#backdropSeg button').forEach(b => b.classList.toggle('active', b === btn));
+}));
+
+// ---------- floating menu button + movable sliding panel ----------
+const menuBtn = document.getElementById('menuBtn');
+const panel = document.getElementById('panel');
+const panelHead = document.getElementById('panelHead');
+const BTN = 52;
+let btnPos = { x: 0, y: 14 }, panelPos = { x: 0, y: 0 }, panelMoved = false;
+
+// the picture on the button (swap this for your own image any time)
+document.getElementById('menuIcon').src = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">' +
+  '<rect x="6" y="12" width="36" height="24" stroke="#d946ef" stroke-width="1.8"/>' +
+  '<g stroke="#ef4444" stroke-width="1.6"><circle cx="6" cy="12" r="3"/><circle cx="24" cy="12" r="3"/><circle cx="42" cy="12" r="3"/>' +
+  '<circle cx="6" cy="36" r="3"/><circle cx="24" cy="36" r="3"/><circle cx="42" cy="36" r="3"/></g>' +
+  '<g stroke="#d946ef" stroke-width="1.4"><line x1="28" y1="27" x2="6" y2="12"/><line x1="28" y1="27" x2="42" y2="12"/><line x1="28" y1="27" x2="24" y2="36"/></g>' +
+  '<circle cx="28" cy="27" r="3.2" stroke="#fde047" stroke-width="1.6"/></svg>');
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+function applyBtn() {
+  btnPos.x = clamp(btnPos.x, 4, window.innerWidth - BTN - 4);
+  btnPos.y = clamp(btnPos.y, 4, window.innerHeight - BTN - 4);
+  menuBtn.style.left = btnPos.x + 'px'; menuBtn.style.top = btnPos.y + 'px';
+}
+function applyPanel() {
+  const pw = panel.offsetWidth, ph = panel.offsetHeight;
+  panelPos.x = clamp(panelPos.x, 4, Math.max(4, window.innerWidth - pw - 4));
+  panelPos.y = clamp(panelPos.y, 4, Math.max(4, window.innerHeight - Math.min(ph, 60) - 4));
+  panel.style.left = panelPos.x + 'px'; panel.style.top = panelPos.y + 'px';
+}
+function placePanelNearButton() {
+  const pw = panel.offsetWidth, ph = panel.offsetHeight;
+  panelPos.x = btnPos.x + BTN - pw;                                     // right-aligned with the button
+  panelPos.y = btnPos.y + BTN + 8;
+  if (panelPos.y + ph > window.innerHeight - 4) panelPos.y = btnPos.y - ph - 8;   // not enough room below: open above
+  applyPanel();
+}
+function setPanel(open) {
+  if (open && !panelMoved) placePanelNearButton();
+  else if (open) applyPanel();
+  panel.classList.toggle('open', open);
+  menuBtn.classList.toggle('on', open);
+  panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+}
+
+// drag the button anywhere; a tap (no real movement) toggles the panel
+(function () {
+  let s = null;
+  menuBtn.addEventListener('pointerdown', e => {
+    s = { px: e.clientX, py: e.clientY, bx: btnPos.x, by: btnPos.y, moved: false };
+    menuBtn.setPointerCapture(e.pointerId); menuBtn.style.cursor = 'grabbing';
+  });
+  menuBtn.addEventListener('pointermove', e => {
+    if (!s) return;
+    const dx = e.clientX - s.px, dy = e.clientY - s.py;
+    if (!s.moved && Math.hypot(dx, dy) > 6) s.moved = true;
+    if (s.moved) { btnPos.x = s.bx + dx; btnPos.y = s.by + dy; applyBtn(); }
+  });
+  const end = () => {
+    if (!s) return;
+    const wasTap = !s.moved; s = null; menuBtn.style.cursor = 'grab';
+    if (wasTap) setPanel(!panel.classList.contains('open'));
+    else if (panel.classList.contains('open') && !panelMoved) placePanelNearButton();
+  };
+  menuBtn.addEventListener('pointerup', end);
+  menuBtn.addEventListener('pointercancel', () => { s = null; });
+})();
+
+// drag the panel by its top bar
+(function () {
+  let s = null;
+  panelHead.addEventListener('pointerdown', e => {
+    if (e.target.closest('#panelClose')) return;
+    s = { px: e.clientX, py: e.clientY, x: panelPos.x, y: panelPos.y };
+    panelHead.setPointerCapture(e.pointerId); panelHead.style.cursor = 'grabbing';
+  });
+  panelHead.addEventListener('pointermove', e => {
+    if (!s) return;
+    panelPos.x = s.x + e.clientX - s.px; panelPos.y = s.y + e.clientY - s.py;
+    panelMoved = true; applyPanel();
+  });
+  const end = () => { s = null; panelHead.style.cursor = 'grab'; };
+  panelHead.addEventListener('pointerup', end);
+  panelHead.addEventListener('pointercancel', end);
+})();
+document.getElementById('panelClose').addEventListener('click', () => setPanel(false));
+
+// ---------- sizing ----------
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  state.W = window.innerWidth; state.H = window.innerHeight;
+  canvas.width = Math.round(state.W * dpr);
+  canvas.height = Math.round(state.H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  syncLimits();
+  applyBtn();
+  if (panel.classList.contains('open')) applyPanel();
+  draw();
+}
+window.addEventListener('resize', resize);
+
+resetRoutes();
+btnPos.x = window.innerWidth - BTN - 14;
+resize();
+</script>
+</body>
+</html>
